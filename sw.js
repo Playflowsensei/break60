@@ -1,5 +1,5 @@
 /* BREAK60 service worker — オフライン用キャッシュ */
-const CACHE = 'break60-v1';
+const CACHE = 'break60-v2';
 const CORE = ['./', './index.html', './manifest.webmanifest'];
 
 self.addEventListener('install', function (e) {

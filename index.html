@@ -200,6 +200,36 @@ body{
 .tab:active{transform:scale(.97);}
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important;}}
+
+/* ---------- log / history / backup ---------- */
+#screen-log{--accent:var(--lime); padding-top:8px;}
+.log-h{font-family:var(--font-display); font-size:13px; letter-spacing:.16em; color:var(--muted); margin:24px 2px 12px; font-weight:700;}
+.log-h.first{margin-top:6px;}
+.log-note{font-size:12.5px; color:var(--muted2); line-height:1.6; margin:0 2px 12px;}
+.hist{display:flex; flex-direction:column; gap:10px;}
+.hist .empty{padding:34px 18px; text-align:center; color:var(--muted); font-size:14px; line-height:1.7; border:1px dashed var(--line2); border-radius:14px;}
+.wk{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:13px 15px;}
+.wk.cur{border-color:color-mix(in srgb,var(--lime) 55%, transparent); box-shadow:0 0 18px color-mix(in srgb,var(--lime) 14%, transparent);}
+.wk.future{opacity:.45;}
+.wk-top{display:flex; align-items:center; gap:10px;}
+.wk-n{font-family:var(--font-display); font-weight:700; font-size:13px; letter-spacing:.1em;}
+.wk-range{font-family:var(--font-display); font-size:11px; color:var(--muted2); letter-spacing:.04em;}
+.wk-cnt{margin-left:auto; font-family:var(--font-display); font-size:13px; color:var(--muted); letter-spacing:.04em;}
+.wk-cnt.win{color:var(--lime);}
+.wk-dots{display:flex; gap:6px; margin-top:10px;}
+.hd-dot{flex:1; height:8px; border-radius:4px; background:var(--line2);}
+.hd-dot.on{background:var(--lime); box-shadow:0 0 8px color-mix(in srgb,var(--lime) 50%, transparent);}
+.hd-dot.fut{opacity:.3;}
+.wk-phase{margin-top:10px; font-size:11.5px; color:var(--muted); line-height:1.55; border-left:2px solid color-mix(in srgb,var(--lime) 45%, transparent); padding-left:10px;}
+.bk{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; display:flex; flex-direction:column; gap:10px;}
+.bk-sub{font-family:var(--font-display); font-weight:700; font-size:13px; letter-spacing:.06em;}
+.bk-btn{border:none; cursor:pointer; border-radius:11px; padding:14px; font-family:var(--font-display); font-weight:700; font-size:14px; letter-spacing:.04em; color:var(--bg); background:var(--lime); transition:transform .12s;}
+.bk-btn:active{transform:scale(.98);}
+.bk-btn.ghost{background:transparent; color:var(--muted); border:1px solid var(--line2);}
+.bk-area{width:100%; min-height:68px; resize:vertical; background:var(--bg2); border:1px solid var(--line); border-radius:10px; padding:10px 12px; color:var(--muted); font-family:ui-monospace,Menlo,monospace; font-size:11px; line-height:1.5; outline:none;}
+.bk-area:focus{border-color:color-mix(in srgb,var(--lime) 50%, transparent);}
+#exportText{display:none;}
+.bk-msg{font-size:12.5px; color:var(--lime); min-height:1em; line-height:1.5;}
 </style>
 </head>
 <body>
@@ -241,11 +271,32 @@ body{
       </div>
       <ul class="w-list" id="wList"></ul>
     </section>
+
+    <section id="screen-log" class="screen">
+      <h2 class="log-h first">8週間の実施履歴</h2>
+      <div class="hist" id="history"></div>
+
+      <h2 class="log-h">バックアップ</h2>
+      <p class="log-note">記録はこの端末の中だけにあります。機種変更やデータ消去に備えて、ときどき書き出して保管してください。</p>
+      <div class="bk">
+        <button class="bk-btn" id="exportBtn">バックアップを書き出す（コピー）</button>
+        <button class="bk-btn ghost" id="downloadBtn">ファイルに保存（Mac向け）</button>
+        <div class="bk-msg" id="exportMsg"></div>
+        <textarea class="bk-area" id="exportText" readonly placeholder="ここに書き出しコードが出ます"></textarea>
+      </div>
+      <div class="bk">
+        <div class="bk-sub">復元する</div>
+        <textarea class="bk-area" id="importText" placeholder="バックアップコードをここに貼り付け"></textarea>
+        <button class="bk-btn" id="importBtn">このコードから復元</button>
+        <div class="bk-msg" id="importMsg"></div>
+      </div>
+    </section>
   </main>
 
   <nav class="nav">
     <button class="tab active" data-screen="today">今日</button>
     <button class="tab" data-screen="weight">体重</button>
+    <button class="tab" data-screen="log">記録</button>
   </nav>
 </div>
 
@@ -485,14 +536,89 @@ body{
     t.addEventListener('click', function(){
       tabs.forEach(function(x){ x.classList.remove('active'); });
       t.classList.add('active');
-      ['today','weight'].forEach(function(name){
+      ['today','weight','log'].forEach(function(name){
         var sc=$('screen-'+name);
         if(name===t.dataset.screen){ sc.classList.remove('active'); void sc.offsetWidth; sc.classList.add('active'); }
         else sc.classList.remove('active');
       });
       if(t.dataset.screen==='weight') renderWeight();
+      if(t.dataset.screen==='log') renderLog();
     });
   });
+
+  // ---- log / history ----
+  function mondayOf(d){ var x=new Date(d); x.setHours(0,0,0,0); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; }
+  function doneDates(){ return Object.keys(DB.checks).filter(function(k){ return DB.checks[k] && DB.checks[k].done; }); }
+
+  function renderLog(){
+    var host=$('history');
+    var dd=doneDates().sort();
+    if(!dd.length){ host.innerHTML='<div class="empty">まだ実施記録がありません。<br>「今日」タブで「今日やった」を押すと、ここに週ごとの記録が溜まっていきます。</div>'; return; }
+    var startMon=mondayOf(fromKey(dd[0])), nowMon=mondayOf(TODAY);
+    var weeksSince=Math.round((nowMon-startMon)/6048e5);
+    var total=Math.max(8, weeksSince+1);
+    var phases=['1–2週：朝15分に慣れる（週4回で勝ち）','1–2週：朝15分に慣れる（週4回で勝ち）',
+                '3–4週：73〜74kg台へ。コンビニ選択を変える','3–4週：73〜74kg台へ。コンビニ選択を変える',
+                '5–6週：キレを作る。止める→一瞬だけ速く','5–6週：キレを作る。止める→一瞬だけ速く',
+                '7–8週：動画で変化を見る。週4を維持','7–8週：動画で変化を見る。週4を維持'];
+    var html='';
+    for(var w=0; w<total; w++){
+      var ws=new Date(startMon); ws.setDate(startMon.getDate()+w*7);
+      var we=new Date(ws); we.setDate(ws.getDate()+6);
+      var isCur=ws.getTime()===nowMon.getTime(), isFut=ws>nowMon, cnt=0, dots='';
+      for(var i=0;i<7;i++){
+        var dy=new Date(ws); dy.setDate(ws.getDate()+i);
+        var on=DB.checks[key(dy)] && DB.checks[key(dy)].done;
+        if(on) cnt++;
+        dots+='<span class="hd-dot'+(on?' on':'')+(dy>TODAY?' fut':'')+'"></span>';
+      }
+      var win=cnt>=4, phase=w<8?phases[w]:'';
+      html+='<div class="wk'+(isCur?' cur':'')+(isFut?' future':'')+'">'+
+        '<div class="wk-top"><span class="wk-n">WEEK '+(w+1)+'</span>'+
+        '<span class="wk-range">'+(ws.getMonth()+1)+'/'+ws.getDate()+'–'+(we.getMonth()+1)+'/'+we.getDate()+'</span>'+
+        '<span class="wk-cnt'+(win?' win':'')+'">'+cnt+'/7'+(win?'　勝ち':'')+'</span></div>'+
+        '<div class="wk-dots">'+dots+'</div>'+
+        (phase?'<div class="wk-phase">'+phase+'</div>':'')+'</div>';
+    }
+    host.innerHTML=html;
+  }
+
+  // ---- backup / restore ----
+  function snapshot(){ return JSON.stringify({ v:1, app:'break60', exported:new Date().toISOString(), data:DB }); }
+  function exportData(){
+    var ta=$('exportText'); ta.value=snapshot(); ta.style.display='block';
+    var ok=false;
+    try{ if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(ta.value); ok=true; } }catch(e){}
+    if(!ok){ try{ ta.focus(); ta.select(); ok=document.execCommand('copy'); }catch(e){} }
+    $('exportMsg').textContent = ok ? 'コピーしました。メモやLINEのKeepに貼って保管を。' : '下のコードを長押し→全選択→コピーして保管を。';
+  }
+  function downloadData(){
+    try{
+      var blob=new Blob([JSON.stringify({ v:1, app:'break60', exported:new Date().toISOString(), data:DB }, null, 2)], { type:'application/json' });
+      var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='break60-backup-'+TODAY_KEY+'.json';
+      document.body.appendChild(a); a.click();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 800);
+      $('exportMsg').textContent='ファイルを書き出しました。';
+    }catch(e){ $('exportMsg').textContent='この端末ではファイル保存に未対応。コピーをお使いください。'; }
+  }
+  function importData(){
+    var raw=$('importText').value.trim();
+    if(!raw){ $('importMsg').textContent='コードを貼り付けてください。'; return; }
+    var obj; try{ obj=JSON.parse(raw); }catch(e){ $('importMsg').textContent='コードが正しくありません。'; return; }
+    var src=(obj && obj.data) ? obj.data : obj;
+    if(!src || (typeof src.checks!=='object' && typeof src.weights!=='object')){ $('importMsg').textContent='バックアップの形式ではありません。'; return; }
+    var nc=0, nw=0, k, d;
+    if(src.weights){ for(k in src.weights){ if(typeof src.weights[k]==='number'){ DB.weights[k]=src.weights[k]; nw++; } } }
+    if(src.checks){ for(d in src.checks){ var imp=src.checks[d]||{}, ex=DB.checks[d]||{done:false,items:{}};
+      DB.checks[d]={ done:!!(ex.done||imp.done), items:Object.assign({}, ex.items||{}, imp.items||{}) }; nc++; } }
+    save();
+    $('importText').value='';
+    $('importMsg').textContent='復元しました（チェック'+nc+'件／体重'+nw+'件をマージ）。';
+    renderWeek(); renderToday(); renderWeight(); renderLog();
+  }
+  $('exportBtn').addEventListener('click', exportData);
+  $('downloadBtn').addEventListener('click', downloadData);
+  $('importBtn').addEventListener('click', importData);
 
   // ---- init ----
   renderHeader();
